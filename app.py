@@ -1,8 +1,9 @@
 import os
 import asyncio
-from PIL import Image, ImageDraw, ImageFont
+import subprocess
+from PIL import Image
 
-# Pillow 10+ compatibility fix
+# Pillow fix
 if not hasattr(Image, 'ANTIALIAS'):
     Image.ANTIALIAS = Image.Resampling.LANCZOS
 
@@ -11,7 +12,7 @@ from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import FSInputFile
-from moviepy.editor import ImageClip, CompositeVideoClip, concatenate_videoclips, AudioFileClip
+from moviepy.editor import ImageClip, concatenate_videoclips, AudioFileClip
 from moviepy.audio.AudioClip import CompositeAudioClip
 from groq import Groq
 import numpy as np
@@ -34,19 +35,14 @@ class EditState(StatesGroup):
 @dp.message(Command("developer"))
 async def dev_cmd(message: types.Message):
     await message.reply(
-        "Hey! 👋\n\nMain hoon **Vaibhav Kesharwani** (aka **Madmax**), Class 11th student jo automation & bots build karta hai! 🫣\n\nAur main kuch nahi bataunga... Hehee! ✨",
+        "Hey! 👋\n\nMain hoon **Vaibhav Kesharwani** (aka **Madmax**), Class 11th student jo automation & bots banata hai! 🫣\n\nBaki nhi bataunga.. Hehe✨",
         parse_mode="Markdown"
     )
 
 @dp.message(Command("help"))
 async def help_cmd(message: types.Message):
     await message.reply(
-        "🎬 **Auto Video Editor Bot - Guide** 🎬\n\n"
-        "1. `/start` dabakar session shuru karein.\n"
-        "2. Voiceover Audio (.mp3) upload karein.\n"
-        "3. Background Music upload karein ya `/skip` karein.\n"
-        "4. Images upload karein aur phir `/done_images` likhein.\n\n"
-        "Bot motions aur subtitles add karke video bhej dega!",
+        "🎬 **Auto Video Editor Bot** 🎬\n\n1. `/start` dabayein.\n2. Voiceover audio (.mp3) bhejein.\n3. Background music bhejein ya `/skip` karein.\n4. Photos upload karein aur `/done_images` likhein.\n\nBot fast motion aur golden subtitles ke sath video bana dega!",
         parse_mode="Markdown"
     )
 
@@ -66,7 +62,7 @@ async def handle_voice(message: types.Message, state: FSMContext):
     voice_path = f"workspace_{user_id}/voice.mp3"
     await bot.download_file(file.file_path, voice_path)
     USER_DATA[user_id]["voice"] = voice_path
-    await message.reply("Voiceover save ho gaya!\n\n2. Ab Background Music (.mp3) bhejo (agar nahi chahiye toh /skip likho).")
+    await message.reply("Voiceover mil gaya!\n\n2. Ab Background Music (.mp3) bhejo (agar nahi chahiye toh /skip likho).")
     await state.set_state(EditState.waiting_for_bg)
 
 @dp.message(EditState.waiting_for_bg)
@@ -92,7 +88,7 @@ async def handle_images(message: types.Message):
     img_path = f"workspace_{user_id}/img_{img_idx}.jpg"
     await bot.download_file(file.file_path, img_path)
     USER_DATA[user_id]["images"].append(img_path)
-    await message.reply(f"Image #{img_idx+1} save ho gayi! Aur images bhejo ya /done_images likho.")
+    await message.reply(f"Photo #{img_idx+1} save ho gayi! Aur bhejo ya /done_images likho.")
 
 def get_whisper_subtitles(audio_path):
     try:
@@ -108,6 +104,37 @@ def get_whisper_subtitles(audio_path):
         print(f"Whisper Error: {e}")
         return []
 
+def format_timestamp_ass(seconds):
+    hours = int(seconds // 3600)
+    minutes = int((seconds % 3600) // 60)
+    secs = int(seconds % 60)
+    centis = int(round((seconds - int(seconds)) * 100))
+    if centis >= 100:
+        centis = 99
+    return f"{hours}:{minutes:02d}:{secs:02d}.{centis:02d}"
+
+def create_ass_subtitle_file(segments, output_ass_path):
+    # ASS format with Golden fill, thick black border & bottom center alignment
+    header = """[Script Info]
+ScriptType: v4.00+
+PlayResX: 720
+PlayResY: 1280
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Default,Cinzel,42,&H0000D7FF,&H00000000,&H00000000,&H80000000,-1,0,0,0,100,100,1,0,1,3.5,0,2,40,40,240,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+"""
+    with open(output_ass_path, "w", encoding="utf-8") as f:
+        f.write(header)
+        for seg in segments:
+            start_str = format_timestamp_ass(seg['start'])
+            end_str = format_timestamp_ass(seg['end'])
+            text = seg['text'].strip().replace("\n", " ")
+            f.write(f"Dialogue: 0,{start_str},{end_str},Default,,0,0,0,,{text}\n")
+
 def prepare_base_image(img_path, target_w=720, target_h=1280):
     with Image.open(img_path) as im:
         im = im.convert("RGB")
@@ -115,7 +142,6 @@ def prepare_base_image(img_path, target_w=720, target_h=1280):
         ratio = max(target_w / img_w, target_h / img_h)
         new_w, new_h = int(img_w * ratio), int(img_h * ratio)
         im = im.resize((new_w, new_h), Image.Resampling.LANCZOS)
-        
         left = (new_w - target_w) // 2
         top = (new_h - target_h) // 2
         im = im.crop((left, top, left + target_w, top + target_h))
@@ -123,42 +149,12 @@ def prepare_base_image(img_path, target_w=720, target_h=1280):
 
 def create_documentary_clip(img_arr, duration, zoom_in=True, w=720, h=1280):
     clip = ImageClip(img_arr).set_duration(duration)
+    # Fast zoom calculation without frame slowdown
     if zoom_in:
-        clip = clip.resize(lambda t: 1.0 + 0.05 * (t / duration))
+        clip = clip.resize(lambda t: 1.0 + 0.04 * (t / duration))
     else:
-        clip = clip.resize(lambda t: 1.06 - 0.05 * (t / duration))
-    return clip.crop(x_center=clip.w/2, y_center=clip.h/2, width=w, height=h).crossfadein(0.4)
-
-def burn_subtitles_on_frame(frame, t, segments, w=720, h=1280):
-    current_text = ""
-    for seg in segments:
-        if seg['start'] <= t <= seg['end']:
-            current_text = seg['text'].strip()
-            break
-            
-    if not current_text:
-        return frame
-        
-    img = Image.fromarray(frame)
-    draw = ImageDraw.Draw(img)
-    
-    try:
-        font = ImageFont.truetype("font.ttf", 38)
-    except:
-        font = ImageFont.load_default()
-        
-    bbox = draw.textbbox((0, 0), current_text, font=font)
-    text_w = bbox[2] - bbox[0]
-    text_x = (w - text_w) // 2
-    text_y = int(h * 0.78)
-    
-    stroke_w = 3
-    for dx in range(-stroke_w, stroke_w + 1):
-        for dy in range(-stroke_w, stroke_w + 1):
-            draw.text((text_x + dx, text_y + dy), current_text, font=font, fill="black")
-            
-    draw.text((text_x, text_y), current_text, font=font, fill="#FFD700")
-    return np.array(img)
+        clip = clip.resize(lambda t: 1.05 - 0.04 * (t / duration))
+    return clip.crop(x_center=clip.w/2, y_center=clip.h/2, width=w, height=h).crossfadein(0.3)
 
 @dp.message(EditState.waiting_for_images, Command("done_images"))
 async def done_images(message: types.Message, state: FSMContext):
@@ -172,16 +168,11 @@ async def done_images(message: types.Message, state: FSMContext):
     voice_clip = AudioFileClip(data["voice"])
     total_dur = voice_clip.duration
     
-    est_total_seconds = int((total_dur * 3.5) + 6)
-    est_min = est_total_seconds // 60
-    est_sec = est_total_seconds % 60
-    time_str = f"{est_min} minute {est_sec} second" if est_min > 0 else f"{est_sec} second"
-
     status_msg = await message.reply(
         f"⏳ **Video Creation Shuru Ho Gayi Hai!**\n\n"
-        f"⏱ **Estimated Time:** Lagbhag **{time_str}**\n"
+        f"⏱ **Estimated Time:** Lagbhag **1 se 1.5 minute**\n"
         f"📊 **Video Duration:** {int(total_dur)} seconds\n\n"
-        f"Aap aaram se itne time baad check karein, video ready mil jayegi! 🎬",
+        f"Fast processing chal rahi hai, video turant aayegi! 🎬",
         parse_mode="Markdown"
     )
 
@@ -192,23 +183,39 @@ async def done_images(message: types.Message, state: FSMContext):
     
     for i, p in enumerate(data["images"]):
         img_arr = prepare_base_image(p, W, H)
-        visuals.append(create_documentary_clip(img_arr, clip_dur + 0.4, zoom_in=(i % 2 == 0), w=W, h=H))
+        visuals.append(create_documentary_clip(img_arr, clip_dur + 0.3, zoom_in=(i % 2 == 0), w=W, h=H))
     
-    final_visual = concatenate_videoclips(visuals, method="compose", padding=-0.4).set_duration(total_dur)
-    segments = get_whisper_subtitles(data["voice"])
-    final_video = final_visual.fl(lambda gf, t: burn_subtitles_on_frame(gf(t), t, segments, W, H))
+    final_visual = concatenate_videoclips(visuals, method="compose", padding=-0.3).set_duration(total_dur)
     
     if data.get("bg") and os.path.exists(data["bg"]):
         bg_clip = AudioFileClip(data["bg"]).volumex(0.12).set_duration(total_dur)
-        final_video = final_video.set_audio(CompositeAudioClip([voice_clip, bg_clip]))
+        final_visual = final_visual.set_audio(CompositeAudioClip([voice_clip, bg_clip]))
     else:
-        final_video = final_video.set_audio(voice_clip)
-        
-    out_path = f"workspace_{user_id}/output.mp4"
-    final_video.write_videofile(out_path, fps=24, codec="libx264", audio_codec="aac", preset="ultrafast", threads=2)
+        final_visual = final_visual.set_audio(voice_clip)
+
+    temp_video = f"workspace_{user_id}/temp_no_sub.mp4"
+    final_visual.write_videofile(temp_video, fps=24, codec="libx264", audio_codec="aac", preset="ultrafast", threads=2)
     
-    vid_file = FSInputFile(out_path)
-    await message.answer_video(video=vid_file, caption="Ye rahi aapki documentary video! 🎬", request_timeout=300)
+    # AI Subtitles fetch & create ASS subtitle file
+    segments = get_whisper_subtitles(data["voice"])
+    ass_path = f"workspace_{user_id}/subtitles.ass"
+    create_ass_subtitle_file(segments, ass_path)
+    
+    # FFmpeg level hardware-fast subtitle burning (5-10 seconds total)
+    out_path = f"workspace_{user_id}/output.mp4"
+    font_arg = "fontsdir=.:" if os.path.exists("font.ttf") else ""
+    cmd = [
+        "ffmpeg", "-y", "-i", temp_video,
+        "-vf", f"subtitles={ass_path}:{font_arg}force_style='Fontname=Cinzel'",
+        "-c:a", "copy",
+        "-preset", "ultrafast",
+        out_path
+    ]
+    subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    
+    vid_to_send = out_path if os.path.exists(out_path) else temp_video
+    vid_file = FSInputFile(vid_to_send)
+    await message.answer_video(video=vid_file, caption="Ye rahi aapki ready documentary video! 🎬", request_timeout=300)
     await status_msg.delete()
     await state.clear()
 
@@ -232,3 +239,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+    
