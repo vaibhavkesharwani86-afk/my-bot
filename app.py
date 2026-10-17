@@ -30,6 +30,28 @@ class EditState(StatesGroup):
 
 USER_DATA = {}
 
+@dp.message(Command("developer"))
+async def dev_cmd(message: types.Message):
+    await message.reply(
+        "Hey! 👋\n\n"
+        "Main hoon **Vaibhav Kesharwani** (aka **Madmax**), ek Class 11th student jo automation & bots build karta hai! 🫣\n\n"
+        "Aur main kuch nahi bataunga... Hehee! ✨",
+        parse_mode="Markdown"
+    )
+
+@dp.message(Command("help"))
+async def help_cmd(message: types.Message):
+    await message.reply(
+        "🎬 **Auto Video Editor Bot - Guide** 🎬\n\n"
+        "1. `/start` dabakar session shuru karein.\n"
+        "2. Voiceover Audio (.mp3) upload karein.\n"
+        "3. Background Music upload karein ya `/skip` karein.\n"
+        "4. Images send karein aur phir `/done_images` likhein.\n"
+        "5. Transcript text paste karke bhej dein.\n\n"
+        "Bot automatically video render karke bhej dega!",
+        parse_mode="Markdown"
+    )
+    
 @dp.message(Command("start"))
 async def start_cmd(message: types.Message, state: FSMContext):
     user_id = message.from_user.id
