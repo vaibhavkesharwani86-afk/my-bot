@@ -2,4 +2,5 @@ aiogram>=3.0.0
 google-genai
 moviepy==1.0.3
 imageio-ffmpeg
-pillow
+pillow<10.0.0
+
