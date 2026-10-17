@@ -10,6 +10,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from moviepy.editor import ImageClip, AudioFileClip, concatenate_videoclips, CompositeAudioClip
+from moviepy.audio.fx.all import audio_loop
 from google import genai
 from aiohttp import web
 
@@ -132,7 +133,7 @@ async def render_video_task(callback: types.CallbackQuery, state: FSMContext):
     final_video = concatenate_videoclips(clips, method="compose")
     
     if data.get("bg") and os.path.exists(data["bg"]):
-        bg_clip = AudioFileClip(data["bg"]).volumex(0.12).loop(duration=total_duration)
+        bg_clip = AudioFileClip(data["bg"]).volumex(0.12).set_duration(total_duration)
         final_audio = CompositeAudioClip([voice_clip, bg_clip])
     else:
         final_audio = voice_clip
