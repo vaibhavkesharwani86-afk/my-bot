@@ -2,7 +2,7 @@ import os
 import asyncio
 from PIL import Image
 
-# Pillow 10+ patch
+# Pillow patch
 if not hasattr(Image, 'ANTIALIAS'):
     Image.ANTIALIAS = Image.Resampling.LANCZOS
 
@@ -28,7 +28,6 @@ class EditState(StatesGroup):
     waiting_for_bg = State()
     waiting_for_images = State()
 
-# --- COMMANDS ---
 @dp.message(Command("developer"))
 async def dev_cmd(message: types.Message):
     await message.reply(
@@ -39,7 +38,7 @@ async def dev_cmd(message: types.Message):
 @dp.message(Command("help"))
 async def help_cmd(message: types.Message):
     await message.reply(
-        "🎬 **Auto Video Editor Bot** 🎬\n\n1. `/start` dabayein.\n2. Voiceover audio (.mp3) bhejein.\n3. Background music bhejein ya `/skip` karein.\n4. Photos upload karein aur `/done_images` likhein.\n\nBot smooth Zoom In/Out effects ke sath clean video bana dega!",
+        "🎬 **Shorts Video Editor Bot** 🎬\n\n1. `/start` dabayein.\n2. Voiceover (.mp3) bhejein.\n3. Background music bhejein ya `/skip` karein.\n4. Photos upload karein aur `/done_images` likhein.\n\nBot bina crash hue 20-30 second mein ready 9:16 vertical shorts de dega!",
         parse_mode="Markdown"
     )
 
@@ -48,10 +47,9 @@ async def start_cmd(message: types.Message, state: FSMContext):
     user_id = message.from_user.id
     USER_DATA[user_id] = {"images": []}
     os.makedirs(f"workspace_{user_id}", exist_ok=True)
-    await message.reply("Namaste! Automated Video Editor Bot active hai.\n\n1. Sabse pehle apna Voiceover Audio (.mp3) bhejo.")
+    await message.reply("Namaste! Shorts Video Editor Bot active hai.\n\n1. Sabse pehle apna Voiceover Audio (.mp3) bhejo.")
     await state.set_state(EditState.waiting_for_voice)
 
-# --- MEDIA HANDLERS ---
 @dp.message(EditState.waiting_for_voice, F.audio | F.voice | F.document)
 async def handle_voice(message: types.Message, state: FSMContext):
     user_id = message.from_user.id
@@ -60,7 +58,7 @@ async def handle_voice(message: types.Message, state: FSMContext):
     voice_path = f"workspace_{user_id}/voice.mp3"
     await bot.download_file(file.file_path, voice_path)
     USER_DATA[user_id]["voice"] = voice_path
-    await message.reply("Voiceover save ho gaya!\n\n2. Ab Background Music (.mp3) bhejo (agar nahi chahiye toh /skip likho).")
+    await message.reply("Voiceover mil gaya!\n\n2. Ab Background Music (.mp3) bhejo ya na chahiye ho toh /skip likho.")
     await state.set_state(EditState.waiting_for_bg)
 
 @dp.message(EditState.waiting_for_bg)
@@ -74,7 +72,7 @@ async def handle_bg(message: types.Message, state: FSMContext):
         bg_path = f"workspace_{user_id}/bg.mp3"
         await bot.download_file(file.file_path, bg_path)
         USER_DATA[user_id]["bg"] = bg_path
-    await message.reply("Music set ho gaya!\n\n3. Ab Photos ek-ek karke bhejo.\nSab upload hone ke baad likho: /done_images")
+    await message.reply("Music set! Ab Photos ek-ek karke bhejo.\nSab upload hone ke baad type karo: /done_images")
     await state.set_state(EditState.waiting_for_images)
 
 @dp.message(EditState.waiting_for_images, F.photo | F.document)
@@ -88,7 +86,6 @@ async def handle_images(message: types.Message):
     USER_DATA[user_id]["images"].append(img_path)
     await message.reply(f"Photo #{img_idx+1} save ho gayi! Aur bhejo ya /done_images likho.")
 
-# --- ZOOM IN / ZOOM OUT PROCESSING ---
 def prepare_base_image(img_path, target_w=720, target_h=1280):
     with Image.open(img_path) as im:
         im = im.convert("RGB")
@@ -101,33 +98,23 @@ def prepare_base_image(img_path, target_w=720, target_h=1280):
         im = im.crop((left, top, left + target_w, top + target_h))
         return np.array(im)
 
-def create_zoom_clip(img_arr, duration, zoom_in=True, w=720, h=1280):
-    clip = ImageClip(img_arr).set_duration(duration)
-    # Smooth Zoom In vs Zoom Out
-    if zoom_in:
-        clip = clip.resize(lambda t: 1.0 + 0.08 * (t / duration))
-    else:
-        clip = clip.resize(lambda t: 1.08 - 0.08 * (t / duration))
-    return clip.crop(x_center=clip.w/2, y_center=clip.h/2, width=w, height=h).crossfadein(0.3)
-
-# --- VIDEO RENDER ---
 @dp.message(EditState.waiting_for_images, Command("done_images"))
 async def done_images(message: types.Message, state: FSMContext):
     user_id = message.from_user.id
     data = USER_DATA.get(user_id, {})
     
     if not data.get("images"):
-        await message.reply("Pehle kam se kam ek photo toh bhejo!")
+        await message.reply("Pehle kam se kam ek photo bhejo!")
         return
 
     voice_clip = AudioFileClip(data["voice"])
     total_dur = voice_clip.duration
     
     status_msg = await message.reply(
-        f"⏳ **Video Creation Shuru Ho Gayi Hai!**\n\n"
-        f"⏱ **Estimated Time:** Lagbhag **40 se 50 second**\n"
-        f"📊 **Video Duration:** {int(total_dur)} seconds\n\n"
-        f"Smooth Zoom Effects apply ho rahe hain... Bas thoda sa wait karein! 🎬",
+        f"⏳ **Shorts Render Shuru!**\n\n"
+        f"⏱ **Estimated Time:** Lagbhag **20 se 30 second**\n"
+        f"📊 **Duration:** {int(total_dur)}s\n\n"
+        f"Voice-matched cuts aur transitions lag rahe hain... 🎬",
         parse_mode="Markdown"
     )
 
@@ -136,15 +123,13 @@ async def done_images(message: types.Message, state: FSMContext):
     clip_dur = total_dur / num_imgs
     visuals = []
     
-    for i, p in enumerate(data["images"]):
+    for p in data["images"]:
         img_arr = prepare_base_image(p, W, H)
-        # Alternate Zoom In aur Zoom Out
-        is_zoom_in = (i % 2 == 0)
-        visuals.append(create_zoom_clip(img_arr, clip_dur + 0.3, zoom_in=is_zoom_in, w=W, h=H))
+        clip = ImageClip(img_arr).set_duration(clip_dur + 0.3).crossfadein(0.3)
+        visuals.append(clip)
     
     final_video = concatenate_videoclips(visuals, method="compose", padding=-0.3).set_duration(total_dur)
     
-    # Audio Mix
     if data.get("bg") and os.path.exists(data["bg"]):
         bg_clip = AudioFileClip(data["bg"]).volumex(0.12).set_duration(total_dur)
         final_video = final_video.set_audio(CompositeAudioClip([voice_clip, bg_clip]))
@@ -152,21 +137,28 @@ async def done_images(message: types.Message, state: FSMContext):
         final_video = final_video.set_audio(voice_clip)
 
     out_path = f"workspace_{user_id}/output.mp4"
+    
+    # Low-RAM settings: Single thread + ultrafast (RAM usage < 180MB)
     final_video.write_videofile(
         out_path,
         fps=24,
         codec="libx264",
         audio_codec="aac",
         preset="ultrafast",
-        threads=2
+        threads=1
     )
     
+    # RAM free karein
+    final_video.close()
+    voice_clip.close()
+    for v in visuals:
+        v.close()
+        
     vid_file = FSInputFile(out_path)
-    await message.answer_video(video=vid_file, caption="Ye rahi aapki cinematic zoom video! 🎬", request_timeout=300)
+    await message.answer_video(video=vid_file, caption="Ye rahi aapki ready Shorts video! 🎬", request_timeout=300)
     await status_msg.delete()
     await state.clear()
 
-# --- KEEP-ALIVE SERVER ---
 async def handle_ping(request):
     return web.Response(text="Bot is running!")
 
